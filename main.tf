@@ -5,7 +5,7 @@ provider "google" {
 }
 
 resource "google_compute_instance" "web" {
-  name         = "web-server"
+  name         = "terraform"
   machine_type = "e2-medium"
   zone         = var.zone
 
