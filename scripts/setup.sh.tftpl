@@ -4,19 +4,22 @@ set -euxo pipefail
 # ==========================
 # 0) Choose app type
 # ==========================
-APP_TYPE="${1:-${APP_TYPE:-}}"
+# Only this one is a Terraform template variable:
+APP_TYPE_TF="${app_type}"
+# Everything else must be escaped so Terraform doesn't try to interpolate it.
+APP_TYPE="${1:-$${APP_TYPE:-$${APP_TYPE_TF:-}}}"
 
-# Optional: read from GCE instance metadata if empty
-if [[ -z "${APP_TYPE}" ]]; then
+# Optional: read from GCE instance metadata if still empty
+if [[ -z "$${APP_TYPE}" ]]; then
   if curl -fsS -H 'Metadata-Flavor: Google' http://metadata.google.internal >/dev/null 2>&1; then
     APP_TYPE="$(curl -fsS -H 'Metadata-Flavor: Google' \
       'http://metadata.google.internal/computeMetadata/v1/instance/attributes/app_type' || true)"
   fi
 fi
 
-APP_TYPE="${APP_TYPE:-wordpress}"
-if [[ "${APP_TYPE}" != "wordpress" && "${APP_TYPE}" != "laravel" ]]; then
-  echo "Invalid APP_TYPE '${APP_TYPE}'. Must be 'wordpress' or 'laravel'." >&2
+APP_TYPE="$${APP_TYPE:-wordpress}"
+if [[ "$${APP_TYPE}" != "wordpress" && "$${APP_TYPE}" != "laravel" ]]; then
+  echo "Invalid APP_TYPE '$${APP_TYPE}'. Must be 'wordpress' or 'laravel'." >&2
   exit 2
 fi
 
@@ -35,7 +38,7 @@ add-apt-repository -y ppa:ondrej/php
 retry apt-get update -y
 
 # ==========================
-# 2) Install core services
+# 2) Install core services + PHP 8.3 deps
 # ==========================
 retry apt-get install -y \
   nginx \
@@ -43,30 +46,26 @@ retry apt-get install -y \
   php8.3 php8.3-fpm php8.3-cli \
   php8.3-mysql php8.3-zip php8.3-curl php8.3-mbstring php8.3-xml php8.3-gd php8.3-intl php8.3-bcmath
 
-# PHP-FPM service & socket (PHP 8.3)
+# Enable/ensure php-fpm
 PHPFPM_UNIT="php8.3-fpm"
 PHP_SOCK="/run/php/php8.3-fpm.sock"
-
-# Harden basic PHP-FPM (optional: ensure listen socket exists after restart)
-systemctl enable --now "${PHPFPM_UNIT}"
+systemctl enable --now "$${PHPFPM_UNIT}"
 
 # ==========================
-# 3) Application-specific
+# 3) App install
 # ==========================
-if [[ "${APP_TYPE}" == "wordpress" ]]; then
+if [[ "$${APP_TYPE}" == "wordpress" ]]; then
   echo "Installing WordPress stack (PHP 8.3)..."
-  # Download & place WP
   cd /tmp
   curl -fsSLO https://wordpress.org/latest.tar.gz
   tar xzf latest.tar.gz
   mv wordpress /var/www/html/wordpress
 
-  # Permissions
   chown -R www-data:www-data /var/www/html/wordpress
   find /var/www/html/wordpress -type d -exec chmod 755 {} \;
   find /var/www/html/wordpress -type f -exec chmod 644 {} \;
 
-  # Minimal Nginx vhost for WordPress + PHP 8.3-FPM
+  # Nginx site for WordPress
   cat >/etc/nginx/sites-available/wordpress <<NGINX
 server {
   listen 80;
@@ -80,7 +79,7 @@ server {
 
   location ~ \.php\$ {
     include snippets/fastcgi-php.conf;
-    fastcgi_pass unix:${PHP_SOCK};
+    fastcgi_pass unix:$${PHP_SOCK};
   }
 
   location ~* \.(jpg|jpeg|gif|png|css|js|ico|webp|svg|woff2?)\$ {
@@ -92,20 +91,17 @@ NGINX
 
   ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/default
 
-elif [[ "${APP_TYPE}" == "laravel" ]]; then
+elif [[ "$${APP_TYPE}" == "laravel" ]]; then
   echo "Installing Laravel stack (PHP 8.3 + Composer)..."
-
-  # Composer
   cd /tmp
   php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
   php composer-setup.php --quiet
   mv composer.phar /usr/local/bin/composer
 
-  # Create Laravel app
   mkdir -p /var/www/html/laravel
   composer create-project --prefer-dist laravel/laravel /var/www/html/laravel
 
-  # Permissions for Laravel (storage + bootstrap/cache need write)
+  # Permissions: allow www-data to write to storage and cache
   chown -R www-data:www-data /var/www/html/laravel
   find /var/www/html/laravel -type d -exec chmod 755 {} \;
   find /var/www/html/laravel -type f -exec chmod 644 {} \;
@@ -115,7 +111,7 @@ elif [[ "${APP_TYPE}" == "laravel" ]]; then
   # Generate APP_KEY
   sudo -u www-data bash -lc 'cd /var/www/html/laravel && php artisan key:generate'
 
-  # Minimal Nginx vhost for Laravel + PHP 8.3-FPM
+  # Nginx site for Laravel
   cat >/etc/nginx/sites-available/laravel <<NGINX
 server {
   listen 80;
@@ -129,7 +125,7 @@ server {
 
   location ~ \.php\$ {
     include snippets/fastcgi-php.conf;
-    fastcgi_pass unix:${PHP_SOCK};
+    fastcgi_pass unix:$${PHP_SOCK};
   }
 
   location ~* \.(jpg|jpeg|gif|png|css|js|ico|webp|svg|woff2?)\$ {
@@ -143,11 +139,11 @@ NGINX
 fi
 
 # ==========================
-# 4) Services & firewall
+# 4) Services
 # ==========================
 systemctl enable --now nginx
 nginx -t
 systemctl reload nginx || systemctl restart nginx
-systemctl restart "${PHPFPM_UNIT}" || true
+systemctl restart "$${PHPFPM_UNIT}" || true
 
-echo "✅ Setup complete for ${APP_TYPE} with PHP 8.3"
+echo "✅ Setup complete for $${APP_TYPE} with PHP 8.3"

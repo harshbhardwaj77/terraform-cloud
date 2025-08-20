@@ -11,7 +11,13 @@ terraform {
 provider "google" {
   project     = var.project_id
   region      = var.region
-  credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON) # base64 of SA JSON
+  credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON)
+}
+
+# Resolve latest Ubuntu 24.04 LTS from family
+data "google_compute_image" "ubuntu_2404" {
+  family  = "ubuntu-2404-lts"
+  project = "ubuntu-os-cloud"
 }
 
 # Allow HTTP/HTTPS to instances tagged "web"
@@ -36,25 +42,23 @@ resource "google_compute_instance" "web" {
 
   boot_disk {
     initialize_params {
-      # Track latest Ubuntu 24.04 LTS image
-      image_family  = "ubuntu-2404-lts"
-      image_project = "ubuntu-os-cloud"
-      size          = 30
+      source_image = data.google_compute_image.ubuntu_2204.self_link
+      size         = 30
     }
   }
 
   network_interface {
     network = "default"
-    access_config {} # public IP
+    access_config {}
   }
 
-  # Inject SSH key (optional) and also pass app_type in metadata
+  # Optional SSH access + pass app_type via metadata as well
   metadata = {
     ssh-keys = "ubuntu:${var.ssh_public_key}"
     app_type = var.app_type
   }
 
-  # Run the setup script at first boot with app_type templated in
+  # Use a template so only ${app_type} is interpolated by Terraform
   metadata_startup_script = templatefile(
     "${path.module}/scripts/setup.sh.tftpl",
     { app_type = var.app_type }
