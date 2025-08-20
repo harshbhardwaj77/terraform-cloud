@@ -1,7 +1,7 @@
 variable "GOOGLE_CREDENTIALS_JSON" {
-  description = "Base64 encoded GCP credentials JSON"
+  description = "Base64 encoded GCP service account JSON"
   type        = string
-  sensitive   = true  # Marked as sensitive for security
+  sensitive   = true
 }
 
 variable "project_id" {
@@ -22,17 +22,13 @@ variable "zone" {
 variable "app_type" {
   description = "Choose the app type: wordpress or laravel"
   type        = string
-  default     = "wordpress"  # Default value
-}
-
-variable "ssh_private_key" {
-  description = "PEM contents of the private SSH key"
-  type        = string
-  sensitive   = true
+  validation {
+    condition     = contains(["wordpress", "laravel"], var.app_type)
+    error_message = "app_type must be either 'wordpress' or 'laravel'."
+  }
 }
 
 variable "ssh_public_key" {
-  description = "OpenSSH public key contents (single line)"
+  description = "OpenSSH public key (single line, e.g. ssh-ed25519 ... user@host)"
   type        = string
 }
-

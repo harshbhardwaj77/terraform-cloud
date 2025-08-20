@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+set -euxo pipefail
+
+# ==========================
+# 0) Choose app type
+# ==========================
+APP_TYPE="${1:-${APP_TYPE:-}}"
+
+# Optional: read from GCE instance metadata if empty
+if [[ -z "${APP_TYPE}" ]]; then
+  if curl -fsS -H 'Metadata-Flavor: Google' http://metadata.google.internal >/dev/null 2>&1; then
+    APP_TYPE="$(curl -fsS -H 'Metadata-Flavor: Google' \
+      'http://metadata.google.internal/computeMetadata/v1/instance/attributes/app_type' || true)"
+  fi
+fi
+
+APP_TYPE="${APP_TYPE:-wordpress}"
+if [[ "${APP_TYPE}" != "wordpress" && "${APP_TYPE}" != "laravel" ]]; then
+  echo "Invalid APP_TYPE '${APP_TYPE}'. Must be 'wordpress' or 'laravel'." >&2
+  exit 2
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+
+retry() { for i in {1..10}; do "$@" && break || { echo "retry $i"; sleep 6; }; done; }
+
+# ==========================
+# 1) Base OS + PHP 8.3 repo
+# ==========================
+retry apt-get update -y
+retry apt-get install -y software-properties-common ca-certificates lsb-release curl unzip git gnupg
+
+# PHP 8.3 for Ubuntu 22.04 via Ondřej PPA
+add-apt-repository -y ppa:ondrej/php
+retry apt-get update -y
+
+# ==========================
+# 2) Install core services
+# ==========================
+retry apt-get install -y \
+  nginx \
+  mysql-server \
+  php8.3 php8.3-fpm php8.3-cli \
+  php8.3-mysql php8.3-zip php8.3-curl php8.3-mbstring php8.3-xml php8.3-gd php8.3-intl php8.3-bcmath
+
+# PHP-FPM service & socket (PHP 8.3)
+PHPFPM_UNIT="php8.3-fpm"
+PHP_SOCK="/run/php/php8.3-fpm.sock"
+
+# Harden basic PHP-FPM (optional: ensure listen socket exists after restart)
+systemctl enable --now "${PHPFPM_UNIT}"
+
+# ==========================
+# 3) Application-specific
+# ==========================
+if [[ "${APP_TYPE}" == "wordpress" ]]; then
+  echo "Installing WordPress stack (PHP 8.3)..."
+  # Download & place WP
+  cd /tmp
+  curl -fsSLO https://wordpress.org/latest.tar.gz
+  tar xzf latest.tar.gz
+  mv wordpress /var/www/html/wordpress
+
+  # Permissions
+  chown -R www-data:www-data /var/www/html/wordpress
+  find /var/www/html/wordpress -type d -exec chmod 755 {} \;
+  find /var/www/html/wordpress -type f -exec chmod 644 {} \;
+
+  # Minimal Nginx vhost for WordPress + PHP 8.3-FPM
+  cat >/etc/nginx/sites-available/wordpress <<NGINX
+server {
+  listen 80;
+  server_name _;
+  root /var/www/html/wordpress;
+  index index.php index.html;
+
+  location / {
+    try_files \$uri \$uri/ /index.php?\$args;
+  }
+
+  location ~ \.php\$ {
+    include snippets/fastcgi-php.conf;
+    fastcgi_pass unix:${PHP_SOCK};
+  }
+
+  location ~* \.(jpg|jpeg|gif|png|css|js|ico|webp|svg|woff2?)\$ {
+    expires 30d;
+    access_log off;
+  }
+}
+NGINX
+
+  ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/default
+
+elif [[ "${APP_TYPE}" == "laravel" ]]; then
+  echo "Installing Laravel stack (PHP 8.3 + Composer)..."
+
+  # Composer
+  cd /tmp
+  php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+  php composer-setup.php --quiet
+  mv composer.phar /usr/local/bin/composer
+
+  # Create Laravel app
+  mkdir -p /var/www/html/laravel
+  composer create-project --prefer-dist laravel/laravel /var/www/html/laravel
+
+  # Permissions for Laravel (storage + bootstrap/cache need write)
+  chown -R www-data:www-data /var/www/html/laravel
+  find /var/www/html/laravel -type d -exec chmod 755 {} \;
+  find /var/www/html/laravel -type f -exec chmod 644 {} \;
+  chmod -R 775 /var/www/html/laravel/storage /var/www/html/laravel/bootstrap/cache
+  chgrp -R www-data /var/www/html/laravel/storage /var/www/html/laravel/bootstrap/cache
+
+  # Generate APP_KEY
+  sudo -u www-data bash -lc 'cd /var/www/html/laravel && php artisan key:generate'
+
+  # Minimal Nginx vhost for Laravel + PHP 8.3-FPM
+  cat >/etc/nginx/sites-available/laravel <<NGINX
+server {
+  listen 80;
+  server_name _;
+  root /var/www/html/laravel/public;
+  index index.php index.html;
+
+  location / {
+    try_files \$uri \$uri/ /index.php?\$query_string;
+  }
+
+  location ~ \.php\$ {
+    include snippets/fastcgi-php.conf;
+    fastcgi_pass unix:${PHP_SOCK};
+  }
+
+  location ~* \.(jpg|jpeg|gif|png|css|js|ico|webp|svg|woff2?)\$ {
+    expires 30d;
+    access_log off;
+  }
+}
+NGINX
+
+  ln -sf /etc/nginx/sites-available/laravel /etc/nginx/sites-enabled/default
+fi
+
+# ==========================
+# 4) Services & firewall
+# ==========================
+systemctl enable --now nginx
+nginx -t
+systemctl reload nginx || systemctl restart nginx
+systemctl restart "${PHPFPM_UNIT}" || true
+
+echo "✅ Setup complete for ${APP_TYPE} with PHP 8.3"

@@ -1,58 +1,64 @@
+terraform {
+  required_version = ">= 1.6.0"
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = ">= 5.0"
+    }
+  }
+}
+
 provider "google" {
   project     = var.project_id
   region      = var.region
-  # var.GOOGLE_CREDENTIALS_JSON should be a BASE64 string of the service-account JSON
-  credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON)
+  credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON) # base64 of SA JSON
+}
+
+# Allow HTTP/HTTPS to instances tagged "web"
+resource "google_compute_firewall" "allow_web" {
+  name    = "allow-web-80-443"
+  network = "default"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80", "443"]
+  }
+
+  target_tags   = ["web"]
+  source_ranges = ["0.0.0.0/0"]
 }
 
 resource "google_compute_instance" "web" {
   name         = "terraform-instance"
   machine_type = "e2-medium"
   zone         = var.zone
+  tags         = ["web"]
 
   boot_disk {
     initialize_params {
-      image = "ubuntu-2204-lts"
+      # Track latest Ubuntu 24.04 LTS image
+      image_family  = "ubuntu-2404-lts"
+      image_project = "ubuntu-os-cloud"
+      size          = 30
     }
   }
 
   network_interface {
     network = "default"
-    access_config {}
+    access_config {} # public IP
   }
 
-  # Inject your SSH public key so the VM accepts your connection
-  # Make sure var.ssh_public_key is like: ssh-ed25519 AAAA... user@host
+  # Inject SSH key (optional) and also pass app_type in metadata
   metadata = {
     ssh-keys = "ubuntu:${var.ssh_public_key}"
+    app_type = var.app_type
   }
 
-  # Optional: also run your startup script automatically at boot
-  # (keep this only if scripts/setup.sh exists in the repo)
-  metadata_startup_script = file("scripts/setup.sh")
+  # Run the setup script at first boot with app_type templated in
+  metadata_startup_script = templatefile(
+    "${path.module}/scripts/setup.sh.tftpl",
+    { app_type = var.app_type }
+  )
 
-  tags = ["web"]
-
-  # ==== Provisioners ====
-  # Use key CONTENTS from a TFC variable, not file() (file() looks on runner's filesystem)
-  connection {
-    type        = "ssh"
-    user        = "ubuntu"
-    private_key = var.ssh_private_key
-    host        = self.network_interface[0].access_config[0].nat_ip
-  }
-
-  # 1 Upload the script first
-  provisioner "file" {
-    source      = "scripts/setup.sh"
-    destination = "/tmp/setup.sh"
-  }
-
-  # 2 Then execute it with your selected app type
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/setup.sh",
-      "sudo /tmp/setup.sh ${var.app_type}"
-    ]
-  }
+  depends_on = [google_compute_firewall.allow_web]
 }
