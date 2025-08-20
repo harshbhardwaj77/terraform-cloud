@@ -24,9 +24,10 @@ variable "app_type" {
   type        = string
   validation {
     condition     = contains(["wordpress", "laravel"], var.app_type)
-    error_message = "app_type must be either 'wordpress' or 'laravel'."
+    error_message = "app_type must be 'wordpress' or 'laravel'."
   }
 }
+
 
 variable "ssh_public_key" {
   description = "OpenSSH public key (single line, e.g. ssh-ed25519 ... user@host)"
