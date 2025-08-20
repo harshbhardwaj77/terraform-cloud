@@ -1,4 +1,4 @@
-import os, json, re, tempfile, subprocess, base64, shlex
+import os, json, re, tempfile, subprocess, base64
 import streamlit as st
 import hcl2
 
@@ -18,15 +18,10 @@ st.sidebar.caption("Tip: Workspaces isolate state by env. We'll select/create a 
 
 # ========= Helpers =========
 def run_stream(cmd, cwd=None, title="Command"):
-    """
-    Run a subprocess and stream stdout/stderr live into an expander.
-    Returns (ok: bool, full_stdout: str, full_stderr: str)
-    """
+    """Run subprocess and stream output live into an expander."""
     exp = st.expander(f"🔧 {title}", expanded=True)
     code = exp.empty()
-    ps = subprocess.Popen(
-        cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
-    )
+    ps = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     lines = []
     for line in ps.stdout:
         lines.append(line.rstrip("\n"))
@@ -35,14 +30,12 @@ def run_stream(cmd, cwd=None, title="Command"):
     ok = (ps.returncode == 0)
     if not ok:
         exp.error(f"Exit code: {ps.returncode}")
-    return ok, "\n".join(lines), ""  # stderr merged into stdout
+    return ok, "\n".join(lines), ""
 
 def ensure_workspace(workspace_name):
-    # list workspaces
     ok, out, _ = run_stream(["terraform", "workspace", "list"], cwd=INFRA_DIR, title="terraform workspace list")
     if not ok:
         return False
-    # if not present, create; else select
     if not re.search(rf"(^|\s){re.escape(workspace_name)}(\s|$)", out):
         ok, _, _ = run_stream(["terraform", "workspace", "new", workspace_name], cwd=INFRA_DIR, title=f"terraform workspace new {workspace_name}")
         if not ok:
@@ -53,44 +46,64 @@ def ensure_workspace(workspace_name):
             return False
     return True
 
+# ---- robust HCL parsing helpers ----
+def _first_dict(x):
+    """Return a dict whether x is already a dict or a list[dict]."""
+    if isinstance(x, dict):
+        return x
+    if isinstance(x, list):
+        for item in x:
+            if isinstance(item, dict):
+                return item
+    return {}
+
 def load_variables_tf(path):
     with open(path, "r", encoding="utf-8") as f:
         obj = hcl2.load(f)
     vars_list = []
     for block in obj.get("variable", []):
         for name, attrs in block.items():
+            attrs = _first_dict(attrs)
             vars_list.append({"name": name, "attrs": attrs})
     return vars_list
 
 def extract_allowed_values(attrs):
+    """Find contains([ ... ], var.x) inside validation.condition (dict or list)."""
     validation = attrs.get("validation")
-    if not validation: return None
+    if validation is None:
+        return None
+    validation = _first_dict(validation)
     cond = validation.get("condition")
-    if not cond: return None
-    s = str(cond)
+    if cond is None:
+        return None
+    try:
+        s = json.dumps(cond)
+    except Exception:
+        s = str(cond)
     m = re.search(r"contains\(\s*\[([^\]]+)\]", s)
-    if not m: return None
+    if not m:
+        return None
     inside = m.group(1)
     vals = re.findall(r'"([^"]+)"', inside)
-    return vals if vals else None
+    return vals or None
 
 def looks_secret(name):
     return any(k in name.lower() for k in ["password","pass","secret","token","key","credentials","private"])
 
 def default_from_attrs(attrs):
-    return attrs.get("default", None)
+    if "default" not in attrs:
+        return None
+    d = attrs["default"]
+    if isinstance(d, list) and len(d) == 0:
+        return None
+    return d
 
 def detect_plan_has_changes(plan_stdout: str) -> bool:
-    """
-    Terraform prints a summary like:
-      Plan: 1 to add, 0 to change, 0 to destroy.
-    Or: No changes. Your infrastructure matches the configuration.
-    """
     if "No changes." in plan_stdout:
         return False
     m = re.search(r"Plan:\s+(\d+)\s+to add,\s+(\d+)\s+to change,\s+(\d+)\s+to destroy\.", plan_stdout)
     if not m:
-        # fallback: if we can't parse, assume there might be changes
+        # If we can't parse, assume there might be changes so we don't skip wrongly
         return True
     adds, changes, destroys = map(int, m.groups())
     return (adds + changes + destroys) > 0
@@ -113,7 +126,7 @@ with st.form("tf_form"):
 
     for vb in var_blocks:
         name = vb["name"]
-        attrs = vb["attrs"]
+        attrs = _first_dict(vb["attrs"])  # normalize
         vtype = attrs.get("type", "string")
         default = default_from_attrs(attrs)
         allowed = extract_allowed_values(attrs)
@@ -142,18 +155,15 @@ with st.form("tf_form"):
 
         # Render by type/allowed
         if allowed:
-            default_idx = 0
-            if default in allowed:
-                default_idx = allowed.index(default)
-            selected = st.selectbox(label, allowed, index=default_idx if default in allowed else 0, help=help_txt, key=name)
-            values[name] = selected
+            default_idx = allowed.index(default) if (isinstance(default, str) and default in allowed) else 0
+            values[name] = st.selectbox(label, allowed, index=default_idx, help=help_txt, key=name)
 
         elif "bool" in str(vtype):
             init = bool(default) if isinstance(default, bool) else False
             values[name] = st.checkbox(label, value=init, help=help_txt, key=name)
 
         elif "number" in str(vtype):
-            init = default if isinstance(default, (int,float)) else 0
+            init = default if isinstance(default, (int, float)) else 0
             values[name] = st.number_input(label, value=init, help=help_txt, key=name)
 
         else:
@@ -177,7 +187,7 @@ if run_btn:
     missing = []
     for vb in var_blocks:
         name = vb["name"]
-        attrs = vb["attrs"]
+        attrs = _first_dict(vb["attrs"])
         if "default" not in attrs:
             if values.get(name) in (None, "", []):
                 missing.append(name)
