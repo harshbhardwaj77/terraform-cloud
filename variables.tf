@@ -26,12 +26,13 @@ variable "app_type" {
 }
 
 variable "ssh_private_key" {
-  description = "The private SSH key for accessing the instance"
+  description = "PEM contents of the private SSH key"
   type        = string
-  sensitive   = true  # Marked as sensitive for security
+  sensitive   = true
 }
 
 variable "ssh_public_key" {
-  description = "The public SSH key for the instance"
+  description = "OpenSSH public key contents (single line)"
   type        = string
 }
+
