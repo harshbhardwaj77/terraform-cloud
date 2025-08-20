@@ -1,6 +1,5 @@
 project_id       = "your-gcp-project"
 region           = "us-central1"
 zone             = "us-central1-c"
-credentials_file = "./gcp-key.json"
 ssh_private_key  = "~/.ssh/id_rsa"
 app_type         = "laravel"  # or "wordpress"

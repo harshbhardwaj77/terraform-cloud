@@ -1,7 +1,8 @@
 provider "google" {
   project     = var.project_id
   region      = var.region
-  credentials = jsondecode(base64decode(var.GOOGLE_CREDENTIALS_JSON))  # Use variable for base64 encoded credentials
+  credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON)
+  # Use variable for base64 encoded credentials
 }
 
 resource "google_compute_instance" "web" {
