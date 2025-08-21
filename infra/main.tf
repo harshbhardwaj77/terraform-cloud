@@ -12,13 +12,13 @@ terraform {
 provider "google" {
   project     = var.project_id
   region      = var.region
-  # var.GOOGLE_CREDENTIALS_JSON must be a BASE64 string of your SA JSON
+  # var.GOOGLE_CREDENTIALS_JSON must be a BASE64 string of your service-account JSON
   credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON)
 }
 
-# Resolve latest Ubuntu 24.04 LTS from family
+# Resolve latest Ubuntu 24.04 LTS (amd64) from public images
 data "google_compute_image" "ubuntu_2404" {
-  family  = "ubuntu-2404-lts"
+  family  = "ubuntu-2404-lts-amd64"
   project = "ubuntu-os-cloud"
 }
 
@@ -61,8 +61,8 @@ resource "google_compute_instance" "web" {
     ssh-keys = "ubuntu:${var.ssh_public_key}"
   }
 
-  # Use a plain Bash startup script (no Terraform templating)
-  # Directory layout assumes this file lives in infra/ and the script is in ../scripts/
+  # Plain Bash startup script (no Terraform templating)
+  # Assumes this file lives in infra/ and the script is in ../scripts/
   metadata_startup_script = file("${path.module}/../scripts/setup.sh")
 
   depends_on = [google_compute_firewall.allow_web]
