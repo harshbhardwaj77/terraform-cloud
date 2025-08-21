@@ -44,7 +44,6 @@ resource "google_compute_instance" "web" {
 
   boot_disk {
     initialize_params {
-      # FIX: use 'image' (not source_image) and point to 24.04
       image = data.google_compute_image.ubuntu_2404.self_link
       size  = 30
     }
@@ -55,17 +54,16 @@ resource "google_compute_instance" "web" {
     access_config {}
   }
 
-  # Optional SSH access; also pass app_type via metadata
+  # Pass user’s choice & (optionally) SSH key into instance metadata
   metadata = {
-    ssh-keys = "ubuntu:${var.ssh_public_key}"
     app_type = var.app_type
+    # Ensure var.ssh_public_key is a single-line OpenSSH key (ssh-ed25519/ssh-rsa ...)
+    ssh-keys = "ubuntu:${var.ssh_public_key}"
   }
 
-  # Use the template in ../scripts relative to infra/
-  metadata_startup_script = templatefile(
-    "${path.module}/../scripts/setup.sh.tftpl",
-    { app_type = var.app_type }
-  )
+  # Use a plain Bash startup script (no Terraform templating)
+  # Directory layout assumes this file lives in infra/ and the script is in ../scripts/
+  metadata_startup_script = file("${path.module}/../scripts/setup.sh")
 
   depends_on = [google_compute_firewall.allow_web]
 }

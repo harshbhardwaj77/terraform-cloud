@@ -2,22 +2,22 @@
 set -euxo pipefail
 
 ###################################
-# 0) Choose app type (from TF)
+# 0) Choose app type (no TF templating)
 ###################################
-APP_TYPE_TF="${app_type}"                               # from Terraform
-APP_TYPE="${1:-$${APP_TYPE:-$${APP_TYPE_TF:-}}}"        # CLI arg > env APP_TYPE > TF var
+# Priority: CLI arg > env APP_TYPE > GCE metadata > default "wordpress"
+APP_TYPE="${1:-${APP_TYPE:-}}"
 
-# Optional: read from GCE instance metadata if still empty
-if [[ -z "$${APP_TYPE}" ]]; then
+# Read from GCE instance metadata if still empty
+if [[ -z "${APP_TYPE}" ]]; then
   if curl -fsS -H 'Metadata-Flavor: Google' http://metadata.google.internal >/dev/null 2>&1; then
     APP_TYPE="$(curl -fsS -H 'Metadata-Flavor: Google' \
       'http://metadata.google.internal/computeMetadata/v1/instance/attributes/app_type' || true)"
   fi
 fi
 
-APP_TYPE="$${APP_TYPE:-wordpress}"
-if [[ "$${APP_TYPE}" != "wordpress" && "$${APP_TYPE}" != "laravel" ]]; then
-  echo "Invalid APP_TYPE '$${APP_TYPE}'. Must be 'wordpress' or 'laravel'." >&2
+APP_TYPE="${APP_TYPE:-wordpress}"
+if [[ "${APP_TYPE}" != "wordpress" && "${APP_TYPE}" != "laravel" ]]; then
+  echo "Invalid APP_TYPE '${APP_TYPE}'. Must be 'wordpress' or 'laravel'." >&2
   exit 2
 fi
 
@@ -31,7 +31,7 @@ retry apt-get update -y
 retry apt-get install -y ca-certificates curl unzip git lsb-release gnupg software-properties-common
 
 ###################################
-# 2) Nginx + PHP 8.3 (Ubuntu 24.04)
+# 2) Nginx + PHP 8.3 (Ubuntu 24.04 has PHP 8.3)
 ###################################
 retry apt-get install -y \
   nginx \
@@ -41,7 +41,7 @@ retry apt-get install -y \
 
 PHPFPM_UNIT="php8.3-fpm"
 PHP_SOCK="/run/php/php8.3-fpm.sock"
-systemctl enable --now "$${PHPFPM_UNIT}"
+systemctl enable --now "${PHPFPM_UNIT}"
 systemctl enable --now nginx
 nginx -t || true
 
@@ -51,7 +51,7 @@ chown -R www-data:www-data /var/www/html
 ###################################
 # 3) App install
 ###################################
-if [[ "$${APP_TYPE}" == "wordpress" ]]; then
+if [[ "${APP_TYPE}" == "wordpress" ]]; then
   echo "Installing WordPress…"
   cd /tmp
   curl -fsSLO https://wordpress.org/latest.tar.gz
@@ -77,7 +77,7 @@ server {
 
   location ~ \.php\$ {
     include snippets/fastcgi-php.conf;
-    fastcgi_pass unix:$${PHP_SOCK};
+    fastcgi_pass unix:${PHP_SOCK};
   }
 
   location ~* \.(jpg|jpeg|gif|png|css|js|ico|webp|svg|woff2?)\$ {
@@ -126,7 +126,7 @@ server {
 
   location ~ \.php\$ {
     include snippets/fastcgi-php.conf;
-    fastcgi_pass unix:$${PHP_SOCK};
+    fastcgi_pass unix:${PHP_SOCK};
   }
 
   location ~* \.(jpg|jpeg|gif|png|css|js|ico|webp|svg|woff2?)\$ {
@@ -144,6 +144,6 @@ fi
 ###################################
 nginx -t
 systemctl reload nginx || systemctl restart nginx
-systemctl restart "$${PHPFPM_UNIT}" || true
+systemctl restart "${PHPFPM_UNIT}" || true
 
-echo "✅ Setup complete for $${APP_TYPE} with PHP 8.3"
+echo "✅ Setup complete for ${APP_TYPE} with PHP 8.3"
