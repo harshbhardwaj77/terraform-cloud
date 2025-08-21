@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-# ==========================
-# 0) Choose app type
-# ==========================
-# Only this one is a Terraform template variable:
-APP_TYPE_TF="${app_type}"
-# Everything else must be escaped so Terraform doesn't try to interpolate it.
-APP_TYPE="${1:-$${APP_TYPE:-$${APP_TYPE_TF:-}}}"
+###################################
+# 0) Choose app type (from TF)
+###################################
+APP_TYPE_TF="${app_type}"                               # from Terraform
+APP_TYPE="${1:-$${APP_TYPE:-$${APP_TYPE_TF:-}}}"        # CLI arg > env APP_TYPE > TF var
 
 # Optional: read from GCE instance metadata if still empty
 if [[ -z "$${APP_TYPE}" ]]; then
@@ -24,41 +22,41 @@ if [[ "$${APP_TYPE}" != "wordpress" && "$${APP_TYPE}" != "laravel" ]]; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
-
 retry() { for i in {1..10}; do "$@" && break || { echo "retry $i"; sleep 6; }; done; }
 
-# ==========================
-# 1) Base OS + PHP 8.3 repo
-# ==========================
+###################################
+# 1) Base OS
+###################################
 retry apt-get update -y
-retry apt-get install -y software-properties-common ca-certificates lsb-release curl unzip git gnupg
+retry apt-get install -y ca-certificates curl unzip git lsb-release gnupg software-properties-common
 
-# PHP 8.3 for Ubuntu 22.04 via Ondřej PPA
-add-apt-repository -y ppa:ondrej/php
-retry apt-get update -y
-
-# ==========================
-# 2) Install core services + PHP 8.3 deps
-# ==========================
+###################################
+# 2) Nginx + PHP 8.3 (Ubuntu 24.04)
+###################################
 retry apt-get install -y \
   nginx \
   mysql-server \
   php8.3 php8.3-fpm php8.3-cli \
   php8.3-mysql php8.3-zip php8.3-curl php8.3-mbstring php8.3-xml php8.3-gd php8.3-intl php8.3-bcmath
 
-# Enable/ensure php-fpm
 PHPFPM_UNIT="php8.3-fpm"
 PHP_SOCK="/run/php/php8.3-fpm.sock"
 systemctl enable --now "$${PHPFPM_UNIT}"
+systemctl enable --now nginx
+nginx -t || true
 
-# ==========================
+mkdir -p /var/www/html
+chown -R www-data:www-data /var/www/html
+
+###################################
 # 3) App install
-# ==========================
+###################################
 if [[ "$${APP_TYPE}" == "wordpress" ]]; then
-  echo "Installing WordPress stack (PHP 8.3)..."
+  echo "Installing WordPress…"
   cd /tmp
   curl -fsSLO https://wordpress.org/latest.tar.gz
   tar xzf latest.tar.gz
+  rm -rf /var/www/html/wordpress
   mv wordpress /var/www/html/wordpress
 
   chown -R www-data:www-data /var/www/html/wordpress
@@ -91,17 +89,20 @@ NGINX
 
   ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/default
 
-elif [[ "$${APP_TYPE}" == "laravel" ]]; then
-  echo "Installing Laravel stack (PHP 8.3 + Composer)..."
+else
+  echo "Installing Laravel…"
+  # Composer
   cd /tmp
   php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
   php composer-setup.php --quiet
   mv composer.phar /usr/local/bin/composer
+  rm -f composer-setup.php
 
-  mkdir -p /var/www/html/laravel
-  composer create-project --prefer-dist laravel/laravel /var/www/html/laravel
+  # Create project
+  rm -rf /var/www/html/laravel
+  sudo -u www-data composer create-project --prefer-dist laravel/laravel /var/www/html/laravel
 
-  # Permissions: allow www-data to write to storage and cache
+  # Permissions
   chown -R www-data:www-data /var/www/html/laravel
   find /var/www/html/laravel -type d -exec chmod 755 {} \;
   find /var/www/html/laravel -type f -exec chmod 644 {} \;
@@ -138,10 +139,9 @@ NGINX
   ln -sf /etc/nginx/sites-available/laravel /etc/nginx/sites-enabled/default
 fi
 
-# ==========================
-# 4) Services
-# ==========================
-systemctl enable --now nginx
+###################################
+# 4) Finalize services
+###################################
 nginx -t
 systemctl reload nginx || systemctl restart nginx
 systemctl restart "$${PHPFPM_UNIT}" || true
