@@ -9,6 +9,14 @@ variable "project_id" {
   type        = string
 }
 
+variable "instance_name" {
+  description = "Name of the VM instance"
+  type        = string
+  default     = "terraform-instance"
+}
+
+
+
 variable "region" {
   description = "The GCP region"
   type        = string
