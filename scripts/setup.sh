@@ -1,3 +1,4 @@
+sudo tee /root/setup.sh >/dev/null <<'EOF'
 #!/usr/bin/env bash
 set -euxo pipefail
 
@@ -31,19 +32,21 @@ retry apt-get update -y
 retry apt-get install -y ca-certificates curl unzip git lsb-release gnupg software-properties-common
 
 ###################################
-# 2) Nginx + PHP 8.3 (Ubuntu 24.04 has PHP 8.3)
+# 2) Nginx + PHP 8.3 + MySQL + Varnish
 ###################################
 retry apt-get install -y \
   nginx \
   mysql-server \
+  varnish \
   php8.3 php8.3-fpm php8.3-cli \
   php8.3-mysql php8.3-zip php8.3-curl php8.3-mbstring php8.3-xml php8.3-gd php8.3-intl php8.3-bcmath
 
 PHPFPM_UNIT="php8.3-fpm"
 PHP_SOCK="/run/php/php8.3-fpm.sock"
+
 systemctl enable --now "${PHPFPM_UNIT}"
 systemctl enable --now nginx
-nginx -t || true
+systemctl enable --now varnish
 
 mkdir -p /var/www/html
 chown -R www-data:www-data /var/www/html
@@ -54,7 +57,7 @@ chown -R www-data:www-data /var/www/html
 if [[ "${APP_TYPE}" == "wordpress" ]]; then
   echo "Installing WordPress…"
   cd /tmp
-  curl -fsSLO https://wordpress.org/latest.tar.gz
+  retry curl -fsSLO https://wordpress.org/latest.tar.gz
   tar xzf latest.tar.gz
   rm -rf /var/www/html/wordpress
   mv wordpress /var/www/html/wordpress
@@ -91,14 +94,12 @@ NGINX
 
 else
   echo "Installing Laravel…"
-  # Composer
   cd /tmp
   php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
   php composer-setup.php --quiet
   mv composer.phar /usr/local/bin/composer
   rm -f composer-setup.php
 
-  # Create project
   rm -rf /var/www/html/laravel
   sudo -u www-data composer create-project --prefer-dist laravel/laravel /var/www/html/laravel
 
@@ -145,5 +146,11 @@ fi
 nginx -t
 systemctl reload nginx || systemctl restart nginx
 systemctl restart "${PHPFPM_UNIT}" || true
+systemctl restart varnish || true
 
-echo "✅ Setup complete for ${APP_TYPE} with PHP 8.3"
+echo "✅ Setup complete for ${APP_TYPE} with PHP 8.3 (Varnish installed)"
+EOF
+
+sudo chmod +x /root/setup.sh
+# Let it auto-detect from metadata (which you set via Terraform)
+sudo /root/setup.sh

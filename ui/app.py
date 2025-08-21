@@ -6,6 +6,16 @@ import hcl2
 INFRA_DIR = os.path.abspath("../infra")   # adjust if needed
 VARIABLES_TF = os.path.join(INFRA_DIR, "variables.tf")
 
+# Common GCP regions and zones (extend as you like)
+REGIONS = {
+    "us-central1": ["us-central1-a", "us-central1-b", "us-central1-c", "us-central1-f"],
+    "us-east1":    ["us-east1-b", "us-east1-c", "us-east1-d"],
+    "us-west1":    ["us-west1-a", "us-west1-b", "us-west1-c"],
+    "europe-west1":["europe-west1-b", "europe-west1-c", "europe-west1-d"],
+    "asia-south1": ["asia-south1-a", "asia-south1-b", "asia-south1-c"],
+    "asia-southeast1": ["asia-southeast1-a", "asia-southeast1-b", "asia-southeast1-c"],
+}
+
 st.set_page_config(page_title="Terraform App Console", layout="wide")
 st.title("Terraform App Console")
 
@@ -13,7 +23,6 @@ st.title("Terraform App Console")
 st.sidebar.header("Environment")
 env = st.sidebar.selectbox("Workspace", ["dev", "stage", "prod"], index=0)
 apply_only_if_changes = st.sidebar.checkbox("Apply only if the plan has changes", value=True)
-destroy_mode = st.sidebar.checkbox("Destroy mode (danger)", value=False)
 st.sidebar.caption("Tip: Workspaces isolate state by env. We'll select/create a TF workspace with this name.")
 
 # ========= Helpers =========
@@ -117,6 +126,11 @@ except Exception as e:
 
 st.caption(f"Loaded variables from `{VARIABLES_TF}`")
 
+# Pull defaults (if present) so we can seed region/zone
+defaults = {vb["name"]: default_from_attrs(_first_dict(vb["attrs"])) for vb in var_blocks}
+region_default = defaults.get("region") or "us-central1"
+zone_default = defaults.get("zone") or (REGIONS.get(region_default, ["us-central1-a"])[0])
+
 # ========= Dynamic form =========
 with st.form("tf_form"):
     st.subheader("Variables")
@@ -124,6 +138,12 @@ with st.form("tf_form"):
     values = {}
     uploaded_sa = None
 
+    # We'll keep track of selected region to drive the zone dropdown,
+    # but still write into 'values' so Terraform gets it.
+    selected_region_placeholder = st.empty()
+    selected_zone_placeholder = st.empty()
+
+    # First pass: render all variables with special-casing for region/zone/instance_name
     for vb in var_blocks:
         name = vb["name"]
         attrs = _first_dict(vb["attrs"])  # normalize
@@ -153,19 +173,45 @@ with st.form("tf_form"):
                     st.error(f"Failed to encode uploaded SA JSON: {e}")
             continue
 
-        # Render by type/allowed
+        # Special UX for region
+        if name == "region":
+            regions_list = sorted(REGIONS.keys())
+            try:
+                idx = regions_list.index(default if default in regions_list else region_default)
+            except ValueError:
+                idx = 0
+            sel_region = selected_region_placeholder.selectbox("region", regions_list, index=idx, help=help_txt, key="__region__")
+            values["region"] = sel_region
+            continue
+
+        # Special UX for zone (depends on region)
+        if name == "zone":
+            current_region = values.get("region", region_default)
+            zones_list = REGIONS.get(current_region, [zone_default])
+            try:
+                zidx = zones_list.index(default if default in zones_list else zone_default)
+            except ValueError:
+                zidx = 0
+            sel_zone = selected_zone_placeholder.selectbox("zone", zones_list, index=zidx, help=help_txt, key="__zone__")
+            values["zone"] = sel_zone
+            continue
+
+        # Nice text field for instance_name (if you declared it in variables.tf)
+        if name == "instance_name":
+            init = str(default) if isinstance(default, str) else "terraform-instance"
+            values[name] = st.text_input("instance_name", value=init, help=help_txt, key="__instance_name__")
+            continue
+
+        # Generic renders
         if allowed:
             default_idx = allowed.index(default) if (isinstance(default, str) and default in allowed) else 0
             values[name] = st.selectbox(label, allowed, index=default_idx, help=help_txt, key=name)
-
         elif "bool" in str(vtype):
             init = bool(default) if isinstance(default, bool) else False
             values[name] = st.checkbox(label, value=init, help=help_txt, key=name)
-
         elif "number" in str(vtype):
             init = default if isinstance(default, (int, float)) else 0
             values[name] = st.number_input(label, value=init, help=help_txt, key=name)
-
         else:
             init = str(default) if isinstance(default, str) else ""
             if looks_secret(name):
@@ -173,13 +219,16 @@ with st.form("tf_form"):
             else:
                 values[name] = st.text_input(label, value=init, help=help_txt, key=name)
 
-    col1, col2, col3 = st.columns([1,1,1])
+    # Action row
+    col1, col2, col3, col4 = st.columns([1,1,1,2])
     with col1:
-        action = st.selectbox("Action", ["plan & apply", "plan only"] + (["destroy"] if destroy_mode else []))
+        action = st.selectbox("Action", ["plan & apply", "plan only", "destroy"])
     with col2:
         run_btn = st.form_submit_button("Run")
     with col3:
         st.write("")  # spacer
+    with col4:
+        destroy_confirm = st.checkbox("Confirm destroy (when selected)", value=False)
 
 # ========= Execute =========
 if run_btn:
@@ -191,7 +240,7 @@ if run_btn:
         if "default" not in attrs:
             if values.get(name) in (None, "", []):
                 missing.append(name)
-    if missing:
+    if missing and action != "destroy":
         st.error("Missing required variables: " + ", ".join(missing))
         st.stop()
 
@@ -202,29 +251,34 @@ if run_btn:
     if not ensure_workspace(env):
         st.stop()
 
-    # Write temp tfvars JSON
+    # Write temp tfvars JSON (even for destroy, so required vars exist)
     with tempfile.NamedTemporaryFile("w", suffix=".auto.tfvars.json", delete=False) as f:
         json.dump(values, f)
         tfvars_path = f.name
 
-    # PLAN
-    plan_cmd = ["terraform", "plan", f"-var-file={tfvars_path}"]
-    ok, plan_out, _ = run_stream(plan_cmd, cwd=INFRA_DIR, title="terraform plan")
-    if not ok:
-        st.stop()
-
-    # APPLY (conditional)
     if action == "plan only":
-        st.success("Plan completed ✅")
+        ok, _, _ = run_stream(["terraform", "plan", f"-var-file={tfvars_path}"], cwd=INFRA_DIR, title="terraform plan")
+        if ok:
+            st.success("Plan completed ✅")
+
     elif action == "destroy":
-        ok, _, _ = run_stream(["terraform", "destroy", "-auto-approve", f"-var-file={tfvars_path}"], cwd=INFRA_DIR, title="terraform destroy")
+        if not destroy_confirm:
+            st.error("Please tick 'Confirm destroy' to run destroy.")
+            st.stop()
+        # Show a destroy plan first (nice UX), then auto-approve destroy
+        run_stream(["terraform", "plan", "-destroy", f"-var-file={tfvars_path}"], cwd=INFRA_DIR, title="terraform plan -destroy")
+        ok, _, _ = run_stream(["terraform", "destroy", "-auto-approve", "-input=false", f"-var-file={tfvars_path}"], cwd=INFRA_DIR, title="terraform destroy")
         if ok:
             st.success("Destroy completed ✅")
-    else:
+
+    else:  # plan & apply
+        ok, plan_out, _ = run_stream(["terraform", "plan", f"-var-file={tfvars_path}"], cwd=INFRA_DIR, title="terraform plan")
+        if not ok:
+            st.stop()
         has_changes = detect_plan_has_changes(plan_out)
         if apply_only_if_changes and not has_changes:
             st.warning("No changes detected. Skipping apply (per setting).")
         else:
-            ok, _, _ = run_stream(["terraform", "apply", "-auto-approve", f"-var-file={tfvars_path}"], cwd=INFRA_DIR, title="terraform apply")
+            ok, _, _ = run_stream(["terraform", "apply", "-auto-approve", "-input=false", f"-var-file={tfvars_path}"], cwd=INFRA_DIR, title="terraform apply")
             if ok:
                 st.success("Apply completed 🎉")
