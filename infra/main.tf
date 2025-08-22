@@ -44,7 +44,7 @@ resource "google_compute_instance" "cloudpanel_vm" {
 
   boot_disk {
     initialize_params {
-      image = data.google_compute_image.ubuntu_2404.self_link
+      image = data.google_compute_image.ubuntu_2404.self_link  # Reference Ubuntu 24.04 LTS image
       size  = 30  # 30 GB boot disk size
     }
   }
@@ -63,6 +63,7 @@ resource "google_compute_instance" "cloudpanel_vm" {
   depends_on = [google_compute_firewall.allow_web]  # Ensure the firewall is created first
 }
 
+# Output the external IP address of the VM
 output "vm_ip" {
   description = "The external IP address of the VM"
   value       = google_compute_instance.cloudpanel_vm.network_interface[0].access_config[0].nat_ip
