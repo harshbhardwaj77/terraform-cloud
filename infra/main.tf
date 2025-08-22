@@ -50,7 +50,7 @@ resource "google_compute_instance" "cloudpanel_vm" {
 
   boot_disk {
     initialize_params {
-      image = data.google_compute_image.ubuntu_2404.self_link  # Reference Ubuntu 24.04 LTS image
+      image = "ubuntu-os-cloud/ubuntu-2404-noble-amd64-v20250819"  # Corrected image name
       size  = 30  # 30 GB boot disk size
     }
   }
