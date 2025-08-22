@@ -4,7 +4,7 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = ">= 5.0"
+      version = ">= 5.0.0"
     }
   }
 }
@@ -15,13 +15,13 @@ provider "google" {
   credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON)
 }
 
-# Ubuntu 24.04 LTS public image
+# Use Ubuntu 24.04 LTS
 data "google_compute_image" "ubuntu_2404" {
   family  = "ubuntu-2404-lts"
   project = "ubuntu-os-cloud"
 }
 
-# Allow HTTP and HTTPS traffic
+# Firewall to allow HTTP and HTTPS
 resource "google_compute_firewall" "allow_web" {
   name    = "allow-web-80-443"
   network = "default"
@@ -35,7 +35,7 @@ resource "google_compute_firewall" "allow_web" {
   target_tags   = ["web"]
 }
 
-# Create the VM
+# Create VM
 resource "google_compute_instance" "cloudpanel_vm" {
   name         = var.instance_name
   machine_type = "e2-medium"
@@ -51,7 +51,7 @@ resource "google_compute_instance" "cloudpanel_vm" {
 
   network_interface {
     network       = "default"
-    access_config {} # for external IP
+    access_config {}  # Enables external IP
   }
 
   metadata = {
