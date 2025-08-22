@@ -12,59 +12,51 @@ terraform {
 provider "google" {
   project     = var.project_id
   region      = var.region
-  # var.GOOGLE_CREDENTIALS_JSON should be a BASE64 string of the SA JSON
   credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON)
 }
 
-# Ubuntu 24.04 LTS (Noble) for amd64 from public images
+# Optional: Source public Ubuntu 24.04 image once, can be reused in modules
 data "google_compute_image" "ubuntu_2404" {
-  # Either family works; this one is explicitly amd64:
   family  = "ubuntu-2404-lts-amd64"
   project = "ubuntu-os-cloud"
 }
 
-# Allow HTTP/HTTPS to instances tagged "web"
-resource "google_compute_firewall" "allow_web" {
-  name    = "allow-web-80-443"
-  network = "default"
+# ---------------------------------------------
+# Optional Resources (deployed based on flags)
+# ---------------------------------------------
 
-  allow {
-    protocol = "tcp"
-    ports    = ["80", "443"]
-  }
-
-  target_tags   = ["web"]
-  source_ranges = ["0.0.0.0/0"]
+module "vpc" {
+  source     = "./modules/vpc"
+  project_id = var.project_id
+  region     = var.region
+  create     = var.create_vpc
 }
 
-resource "google_compute_instance" "web" {
-  name         = var.instance_name                # <- variablized
-  machine_type = "e2-medium"
-  zone         = var.zone
-  tags         = ["web"]
+module "firewall" {
+  source     = "./modules/firewall"
+  project_id = var.project_id
+  network    = module.vpc.network_name
+  create     = var.create_firewall
+}
 
-  boot_disk {
-    initialize_params {
-      image = data.google_compute_image.ubuntu_2404.self_link
-      size  = 30
-    }
-  }
+module "bucket" {
+  source     = "./modules/bucket"
+  project_id = var.project_id
+  bucket_name = var.bucket_name
+  location    = var.region
+  create      = var.create_bucket
+}
 
-  network_interface {
-    network = "default"
-    access_config {} # ephemeral public IP
-  }
-
-  # Pass user's choice and SSH key via metadata
-  metadata = {
-    app_type = var.app_type
-    # Ensure var.ssh_public_key is a one-line OpenSSH key (ssh-ed25519/ssh-rsa ...)
-    ssh-keys = "ubuntu:${var.ssh_public_key}"
-  }
-
-  # Plain Bash startup script (no TF templating):
-  # This file assumes infra/ is the current module and script lives in ../scripts/
-  metadata_startup_script = file("${path.module}/../scripts/setup.sh")
-
-  depends_on = [google_compute_firewall.allow_web]
+module "vm" {
+  source        = "./modules/vm"
+  instance_name = var.instance_name
+  zone          = var.zone
+  region        = var.region
+  project_id    = var.project_id
+  tags          = ["web"]
+  network       = module.vpc.network_name
+  ssh_public_key = var.ssh_public_key
+  boot_image    = data.google_compute_image.ubuntu_2404.self_link
+  app_type      = var.app_type
+  create        = var.create_vm
 }

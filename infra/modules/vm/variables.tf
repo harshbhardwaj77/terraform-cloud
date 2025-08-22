@@ -31,19 +31,3 @@ variable "tags" {
   type        = list(string)
   default     = ["cloudpanel"]
 }
-
-variable "ssh_user" {
-  description = "Username to connect to VM"
-  type        = string
-  default     = "ubuntu"
-}
-
-variable "ssh_private_key" {
-  description = "Private SSH key to use for connection"
-  type        = string
-}
-
-variable "install_script_path" {
-  description = "Local path to CloudPanel install script"
-  type        = string
-}
