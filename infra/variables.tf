@@ -1,43 +1,57 @@
 variable "GOOGLE_CREDENTIALS_JSON" {
-  description = "Base64 encoded GCP service account JSON"
+  description = "Base64-encoded GCP credentials JSON"
   type        = string
   sensitive   = true
 }
 
 variable "project_id" {
-  description = "The GCP project ID"
+  description = "GCP Project ID"
   type        = string
 }
-
-variable "instance_name" {
-  description = "Name of the VM instance"
-  type        = string
-  default     = "terraform-instance"
-}
-
-
 
 variable "region" {
-  description = "The GCP region"
+  description = "GCP Region"
   type        = string
-}
+  default     = "us-central1"
 
-variable "zone" {
-  description = "The GCP zone"
-  type        = string
-}
-
-variable "app_type" {
-  description = "Choose the app type: wordpress or laravel"
-  type        = string
   validation {
-    condition     = contains(["wordpress", "laravel"], var.app_type)
-    error_message = "app_type must be 'wordpress' or 'laravel'."
+    condition     = contains(["us-central1", "us-east1", "us-west1", "europe-west1", "asia-south1", "asia-southeast1"], var.region)
+    error_message = "Invalid region."
   }
 }
 
-
-variable "ssh_public_key" {
-  description = "OpenSSH public key (single line, e.g. ssh-ed25519 ... user@host)"
+variable "zone" {
+  description = "GCP Zone"
   type        = string
+  default     = "us-central1-a"
+}
+
+variable "instance_name" {
+  description = "Name of the VM to create (if selected)"
+  type        = string
+  default     = "cloudpanel-vm"
+}
+
+variable "create_vpc" {
+  description = "Whether to create a new VPC"
+  type        = bool
+  default     = false
+}
+
+variable "create_firewall" {
+  description = "Whether to create firewall rules"
+  type        = bool
+  default     = false
+}
+
+variable "create_bucket" {
+  description = "Whether to create a GCS bucket"
+  type        = bool
+  default     = false
+}
+
+variable "create_vm" {
+  description = "Whether to create a VM with CloudPanel"
+  type        = bool
+  default     = false
 }
