@@ -1,9 +1,4 @@
-output "bucket_name" {
-  description = "Name of the created GCS bucket"
-  value       = try(module.bucket.bucket_name, null)
-}
-
 output "vm_ip" {
-  description = "External IP of the created VM"
-  value       = try(module.vm.instance_ip, null)
+  description = "External IP of the CloudPanel VM"
+  value       = google_compute_instance.cloudpanel_vm.network_interface[0].access_config[0].nat_ip
 }
