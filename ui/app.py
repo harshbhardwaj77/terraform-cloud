@@ -26,7 +26,7 @@ apply_only_if_changes = st.sidebar.checkbox("Apply only if the plan has changes"
 def generate_main_tf(resources: list) -> str:
     blocks = [
         'terraform {\n  required_providers {\n    google = {\n      source  = "hashicorp/google"\n      version = ">= 5.0"\n    }\n  }\n}',
-        'provider "google" {\n  project     = var.project_id\n  region      = var.region\n  credentials = jsondecode(base64decode(var.GOOGLE_CREDENTIALS_JSON))\n}'
+        'provider "google" {\n  project     = var.project_id\n  region      = var.region\n  credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON)\n}'
     ]
     for r in resources:
         blocks.append(f'''module "{r}" {{
