@@ -15,6 +15,12 @@ provider "google" {
   credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON)
 }
 
+# Google Service Account for VM
+resource "google_service_account" "default" {
+  account_id   = "my-custom-sa"
+  display_name = "Custom SA for VM Instance"
+}
+
 # Use Ubuntu 24.04 LTS image from Google Cloud's public image repository
 data "google_compute_image" "ubuntu_2404" {
   family  = "ubuntu-2404-lts"
@@ -61,6 +67,11 @@ resource "google_compute_instance" "cloudpanel_vm" {
   metadata_startup_script = file("${path.module}/scripts/cloudpanel.sh")  # Path to the startup script
 
   depends_on = [google_compute_firewall.allow_web]  # Ensure the firewall is created first
+
+  service_account {
+    email  = google_service_account.default.email
+    scopes = ["cloud-platform"]
+  }
 }
 
 # Output the external IP address of the VM
