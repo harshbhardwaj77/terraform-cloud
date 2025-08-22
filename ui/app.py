@@ -3,7 +3,7 @@ import streamlit as st
 import hcl2
 
 # ========= Config =========
-INFRA_DIR = os.path.abspath("../infra")   # adjust if needed
+INFRA_DIR = os.path.abspath("../infra")
 VARIABLES_TF = os.path.join(INFRA_DIR, "variables.tf")
 
 REGIONS = {
@@ -15,28 +15,52 @@ REGIONS = {
     "asia-southeast1": ["asia-southeast1-a", "asia-southeast1-b", "asia-southeast1-c"],
 }
 
-st.set_page_config(page_title="Terraform App Console", layout="wide")
-st.title("Terraform App Console")
+st.set_page_config(page_title="Terraform CloudPanel Setup", layout="wide")
+st.title("Terraform VM with CloudPanel")
 
 st.sidebar.header("Environment")
 env = st.sidebar.selectbox("Workspace", ["dev", "stage", "prod"], index=0)
 apply_only_if_changes = st.sidebar.checkbox("Apply only if the plan has changes", value=True)
 
 # ========= Terraform Generator =========
-def generate_main_tf(resources: list) -> str:
-    blocks = [
-        'terraform {\n  required_providers {\n    google = {\n      source  = "hashicorp/google"\n      version = ">= 5.0"\n    }\n  }\n}',
-        'provider "google" {\n  project     = var.project_id\n  region      = var.region\n  credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON)\n}'
-    ]
-    for r in resources:
-        blocks.append(f'''module "{r}" {{
-  source = "./modules/{r}"
-  project_id = var.project_id
-  region     = var.region
-  zone       = var.zone
-  GOOGLE_CREDENTIALS_JSON = var.GOOGLE_CREDENTIALS_JSON
-}}''')
-    return "\n\n".join(blocks)
+def generate_main_tf() -> str:
+    return '''terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = ">= 5.0"
+    }
+  }
+}
+
+provider "google" {
+  project     = var.project_id
+  region      = var.region
+  credentials = base64decode(var.GOOGLE_CREDENTIALS_JSON)
+}
+
+resource "google_compute_instance" "vm_instance" {
+  name         = var.instance_name
+  machine_type = "e2-medium"
+  zone         = var.zone
+
+  boot_disk {
+    initialize_params {
+      image = "ubuntu-os-cloud/ubuntu-2404-lts"
+    }
+  }
+
+  network_interface {
+    network = "default"
+    access_config {}
+  }
+
+  metadata_startup_script = file("${path.module}/install-cloudpanel.sh")
+
+  metadata = {
+    ssh-keys = "terraform:${var.ssh_public_key}"
+  }
+}'''
 
 # ========= Helpers =========
 def run_stream(cmd, cwd=None, title="Command"):
@@ -140,38 +164,15 @@ with st.form("tf_form"):
             values["zone"] = sel_zone
             continue
 
-        if name == "instance_name":
-            values[name] = st.text_input(name, value=default or "terraform-instance")
-            continue
-
-        if allowed:
-            idx = allowed.index(default) if default in allowed else 0
-            values[name] = st.selectbox(name, allowed, index=idx)
-        elif "bool" in str(attrs.get("type", "")):
-            values[name] = st.checkbox(name, value=default if isinstance(default, bool) else False)
-        elif "number" in str(attrs.get("type", "")):
-            values[name] = st.number_input(name, value=default if isinstance(default, (int,float)) else 0)
-        else:
-            values[name] = st.text_input(name, value=default or "", type="password" if looks_secret(name) else "default")
-
-    st.subheader("Resources to Deploy")
-    selected_modules = []
-    if st.checkbox("Include VPC"): selected_modules.append("vpc")
-    if st.checkbox("Include Firewall Rules"): selected_modules.append("firewall")
-    if st.checkbox("Include GCP Bucket"): selected_modules.append("bucket")
-    if st.checkbox("Include VM with CloudPanel"): selected_modules.append("vm")
+        values[name] = st.text_input(name, value=default or "", type="password" if looks_secret(name) else "default")
 
     action = st.selectbox("Action", ["plan & apply", "plan only", "destroy"])
     destroy_confirm = st.checkbox("Confirm destroy (for destroy only)", value=False)
     run_btn = st.form_submit_button("Run")
 
 if run_btn:
-    if not selected_modules:
-        st.warning("No modules selected.")
-        st.stop()
-
     with open(os.path.join(INFRA_DIR, "main.tf"), "w") as f:
-        f.write(generate_main_tf(selected_modules))
+        f.write(generate_main_tf())
 
     ok, _, _ = run_stream(["terraform", "init", "-upgrade"], cwd=INFRA_DIR, title="terraform init")
     if not ok or not ensure_workspace(env):
