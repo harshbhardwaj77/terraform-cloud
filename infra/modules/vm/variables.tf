@@ -1,10 +1,10 @@
 variable "instance_name" {
-  description = "The name of the VM instance"
+  description = "Name of the GCE instance"
   type        = string
 }
 
-variable "project_id" {
-  description = "GCP project ID"
+variable "zone" {
+  description = "Zone in which to launch the instance"
   type        = string
 }
 
@@ -13,17 +13,40 @@ variable "region" {
   type        = string
 }
 
-variable "zone" {
-  description = "GCP zone"
+variable "project_id" {
+  description = "GCP project ID"
+  type        = string
+}
+
+variable "tags" {
+  description = "Network tags for the instance"
+  type        = list(string)
+  default     = []
+}
+
+variable "network" {
+  description = "VPC network name"
   type        = string
 }
 
 variable "ssh_public_key" {
-  description = "Public SSH key for VM access"
+  description = "SSH public key for accessing the VM"
   type        = string
 }
 
-# Optional: If you are using metadata_startup_script
-# and no longer using provisioners, remove the following:
-# variable "install_script_path" {}
-# variable "ssh_private_key" {}
+variable "boot_image" {
+  description = "Boot image self link"
+  type        = string
+}
+
+variable "app_type" {
+  description = "Application type to decide install script"
+  type        = string
+  default     = "default"
+}
+
+variable "create" {
+  description = "Boolean to control creation of the VM"
+  type        = bool
+  default     = true
+}
