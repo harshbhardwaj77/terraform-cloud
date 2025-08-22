@@ -10,7 +10,7 @@ resource "google_compute_instance" "this" {
   }
 
   network_interface {
-    network = var.network
+    network       = var.network
     access_config {}
   }
 
@@ -39,4 +39,9 @@ resource "google_compute_instance" "this" {
       "sudo /tmp/install-cloudpanel.sh"
     ]
   }
+}
+
+output "instance_ip" {
+  value       = google_compute_instance.this.network_interface[0].access_config[0].nat_ip
+  description = "The external IP address of the VM instance"
 }

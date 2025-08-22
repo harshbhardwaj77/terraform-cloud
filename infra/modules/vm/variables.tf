@@ -1,5 +1,5 @@
 variable "instance_name" {
-  description = "Name of the VM instance"
+  description = "Name of the compute instance"
   type        = string
 }
 
@@ -9,19 +9,19 @@ variable "zone" {
 }
 
 variable "machine_type" {
-  description = "e2-micro, e2-medium, etc."
+  description = "Machine type for the instance"
   type        = string
   default     = "e2-medium"
 }
 
 variable "boot_image" {
-  description = "Ubuntu image to use"
+  description = "Boot disk image to use"
   type        = string
-  default     = "ubuntu-2204-lts"
+  default     = "ubuntu-os-cloud/ubuntu-2004-lts"
 }
 
 variable "network" {
-  description = "Network name (usually default)"
+  description = "Network name to use"
   type        = string
   default     = "default"
 }
@@ -29,22 +29,21 @@ variable "network" {
 variable "tags" {
   description = "List of network tags"
   type        = list(string)
-  default     = []
+  default     = ["cloudpanel"]
 }
 
 variable "ssh_user" {
-  description = "SSH username (e.g., ubuntu)"
+  description = "Username to connect to VM"
   type        = string
   default     = "ubuntu"
 }
 
 variable "ssh_private_key" {
-  description = "Contents of private key for SSH"
+  description = "Private SSH key to use for connection"
   type        = string
-  sensitive   = true
 }
 
 variable "install_script_path" {
-  description = "Path to install-cloudpanel.sh"
+  description = "Local path to CloudPanel install script"
   type        = string
 }

@@ -55,3 +55,17 @@ variable "create_vm" {
   type        = bool
   default     = false
 }
+
+
+variable "instance_name" {
+  type = string
+}
+
+variable "ssh_private_key" {
+  type = string
+}
+
+variable "install_script_path" {
+  type = string
+}
+
