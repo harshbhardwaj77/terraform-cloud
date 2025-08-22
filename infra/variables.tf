@@ -27,9 +27,7 @@ variable "zone" {
 }
 
 variable "instance_name" {
-  description = "Name of the VM to create (if selected)"
-  type        = string
-  default     = "cloudpanel-vm"
+  type = string
 }
 
 variable "create_vpc" {
@@ -57,9 +55,7 @@ variable "create_vm" {
 }
 
 
-variable "instance_name" {
-  type = string
-}
+
 
 variable "ssh_private_key" {
   type = string
