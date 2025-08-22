@@ -201,7 +201,7 @@ if run_btn:
         if not ok:
             st.stop()
         if apply_only_if_changes and not detect_plan_has_changes(plan_out):
-            st.warning("No changes. Skipping apply.")
+            st.warning("No changes detected. Skipping apply.")
         else:
             ok, _, _ = run_stream(["terraform", "apply", "-auto-approve", f"-var-file={tfvars_path}"], cwd=INFRA_DIR, title="terraform apply")
             if ok:
